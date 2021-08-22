@@ -1,0 +1,35 @@
+var overShoot = 10;
+var gain = 0;
+var value = [];
+var tempMeas=flow.get("flow_temperatureCourante");
+var consigneTemp=flow.get("flow_consigneCourante");
+var phaseMontante=flow.get("flow_phaseMontante");
+
+for(i = 0 ; i < 12 ; i++) {
+    if (2<i<9){
+        gain = 11*consigneTemp[i]-140;
+        overShoot = 20;
+    } else {
+        gain = 7.6*consigneTemp[i]-140;
+        overShoot = 10;
+    }
+    if (tempMeas[i]<=consigneTemp[i] && phaseMontante[i]===true) {
+        value[i] = parseInt(Math.round(1.1 * consigneTemp[i] - 4 + overShoot + Math.abs(gain * (consigneTemp[i] - tempMeas[i]) / consigneTemp[i])),10);
+    }
+    else if (tempMeas[i]>consigneTemp[i] && phaseMontante[i]===true) {
+        value[i] = parseInt(Math.round(1.1 * consigneTemp[i] - 4 - overShoot - Math.abs(gain * (consigneTemp[i] - tempMeas[i]) / consigneTemp[i])),10);
+    }
+    else if (tempMeas[i]>consigneTemp[i] && phaseMontante[i]===false) {
+        value[i] = parseInt(Math.round(1.1 * consigneTemp[i] - 4 - overShoot - Math.abs(gain * (consigneTemp[i] - tempMeas[i]) / consigneTemp[i])),10);
+    }
+    else if (tempMeas[i]<=consigneTemp[i] && phaseMontante[i]===false) {
+        value[i] = parseInt(Math.round(1.1 * consigneTemp[i] - 4 + overShoot + Math.abs(gain * (consigneTemp[i] - tempMeas[i]) / consigneTemp[i])),10);
+    }
+    if (value[i] > 255) {
+        value[i] = 255;
+    } else if (value[i] < 0) {
+        value[i] = 0;
+    }
+   flow.set("flow_consigneNum["+i+"]",value[i]);
+}
+return msg;

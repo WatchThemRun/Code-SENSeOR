@@ -1,0 +1,48 @@
+var i;
+var saw_index;
+var out = {};
+var value = [];
+var query = [];
+var values = "";
+
+if(msg.status == "ERR_TIMEOUT")return;
+var SAW = flow.get("SAW_val");
+
+values=msg.payload.split("_");
+len = values.length;
+len2 = flow.get("SAW_val").length
+for(i = 0; i < len2; i++) {
+    saw_index = i + 3;
+    
+    var item = {};
+    item.timestamp      = new Date()
+    item.measurement    = "SAW_PT100";
+    
+    var tags = {};
+    tags.sn       = "0001";
+    tags.id        = "ID_"+n( (i+1));
+    item.tags = tags;
+    
+    var fields = {};
+    //fields.pt100_val = parseFloat(values[i]);
+    if(flow.get("flow_temperatureCourante["+i+"]")==undefined || isNaN(flow.get("flow_temperatureCourante["+i+"]"))==true){
+        flow.set("flow_temperatureCourante["+i+"]",0)
+    }
+    if(SAW[i]==-3276.8){
+        SAW[i]=0;
+    }
+    fields.pt100_val =flow.get("flow_temperatureCourante["+i+"]");
+    fields.saw_val = SAW[i];
+    item.fields = fields;
+    
+    if(fields.saw_val != -3276.8){
+        query.push(item);
+    }
+}
+out.payload = query;
+
+return out;
+
+function n(n){
+    return n > 9 ? "" + n: "0" + n;
+}

@@ -1,0 +1,651 @@
+
+//////////////////////////////////// Déclaration des variables /////////////////////////////////////////////
+var pas_consignePrec = flow.get("flow_pas_consignePrec"); 
+var cycleIndex = flow.get("flow_cycleIndex");
+var TSStart = []; // Heure de lancement de cycle
+var TS =[]; // temps écoulé après lancement de cycle
+var len = 12 // nombre de sondes
+for (i=0; i<len; i++){
+   TSStart[i] = flow.get("flow_TSStart["+i+"]");
+   TS[i] = (msg.payload - TSStart[i])/1000;
+}
+var pasCouper = flow.get("flow_pasCouper"); // nouvaeu pas pour les scénarios non classiques
+var add =  flow.get("flow_add"); // différenciation du pas aux valeurs extremes utilisé pour définiir la consigne précédente
+var cpt = flow.get("flow_cpt"); // compteur déterminant la position de la température
+var Nobreak = flow.get("flow_Nobreak"); // variable pour le scénario de saut de palier aux extremes
+var Nomax = flow.get("flow_Nomax"); // variable pour le scénario de pas intelligents
+var facteurPalier = flow.get("flow_facteurPalier"); // variable permettant de déterminer le nombre de fois que la consigne a atteint les températures max ou min
+var palier = flow.get("flow_palier"); // temps de palier après chaque pas
+var Tmax = flow.get("flow_Tmax");
+var pas = flow.get("flow_pas");
+var iniConsigne =flow.get("flow_iniConsigne"); // consigne de départ
+var cinetique = flow.get("flow_cinetique"); 
+var consigne = []; // consigne actuel
+var cycleDescente = []; 
+var startCycle=flow.get("flow_startCycle");
+var cycleStop=flow.get("flow_stop");
+var Sensconsigne = flow.get("flow_SensConsigne"); // indique le sens de cycle au départ
+var Tmin =30;
+var gaptemps = flow.get("flow_gaptemps") // temps ajouté lors de l'arrivé à une température extreme
+var gaptempstot = flow.get("flow_gaptempstot") // temps total ajouté lors de l'arrivé à une température extreme
+var tempCourante = flow.get("flow_consigneCourante"); // température courante
+var mod1 = []; // modulo du nombre de pas nécessaire pour atteindre la température max ou min
+var ConsignePrecedente = [];
+
+cycleDescente=flow.get("flow_cycleDescente");
+
+//////////// Initialisation du modulo permettant de déterminer le nombre de palier jusqu'à la température max ou min///////////////////////////
+for (i=0;i<len;i++){
+    if(Sensconsigne[i]>0.5){
+        mod1[i]= (Tmax[i]-iniConsigne[i])/pas[i];
+        if(mod1[i]>(Math.floor((Tmax[i]-iniConsigne[i])/pas[i]))){
+            mod1[i]= Math.floor(mod1[i])+1;
+        }
+    }
+    else{
+        mod1[i]= (iniConsigne[i]-Tmin)/pas[i];
+        if(mod1[i]>(Math.floor((iniConsigne[i]-Tmin)/pas[i]))){
+            mod1[i]= Math.floor(mod1[i])+1;
+        }
+    }
+    flow.set("flow_Mod["+i+"]",mod1[i]);
+}
+/////////////// Sauvegarde de la consigne précédente à chaque instant pour les scénarios classique et à saut de palier aux extremes///////////////////////////////////////
+for (i=0;i<len;i++){
+    if(Nomax[i]==false){
+        if(cycleIndex[i]>0){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(cycleIndex[i]>=mod1[i]){
+                        ConsignePrecedente[i]=iniConsigne[i] + ((cycleIndex[i]-1)%mod1[i])*pas[i]-add[i];
+                    }
+                    else{
+                        ConsignePrecedente[i]=iniConsigne[i] + (cycleIndex[i]-1)*pas[i]; 
+                    }
+                }
+                else{
+                    if(cycleIndex[i]>=mod1[i]){
+                        ConsignePrecedente[i]=Tmax[i] - ((cycleIndex[i]-1)%mod1[i])*pas[i]+add[i];
+                    }
+                    else{
+                        ConsignePrecedente[i]=Tmax[i] - (cycleIndex[i]-1)*pas[i];                   
+                    }
+                }
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(cycleIndex[i]>=mod1[i]){
+                        ConsignePrecedente[i]=iniConsigne[i] - ((cycleIndex[i]-1)%mod1[i])*pas[i]+add[i];         
+                    }
+                    else{
+                        ConsignePrecedente[i]=iniConsigne[i] - (cycleIndex[i]-1)*pas[i];                   
+                    }
+                }
+                else{
+                    if(cycleIndex[i]>=mod1[i]){
+                        ConsignePrecedente[i]=Tmin + ((cycleIndex[i]-1)%mod1[i])*pas[i]-add[i];   
+                    }
+                    else{
+                        ConsignePrecedente[i]=Tmin + (cycleIndex[i]-1)*pas[i];      
+                    }   
+                }
+            }
+        }
+        flow.set("flow_ConsignePrecedente["+i+"]",ConsignePrecedente[i]);
+    }
+}
+
+//////////////////// Saut de temps en cas d'arriver aux extremes trop rapide + définition du nouveau pas pour le prochain palier///////////////////////////
+for (i=0;i<len;i++){
+/////////////////// Pour le scénario classique ////////////////////////////////////////////    
+    if(Nobreak[i]==false && Nomax[i]==false){
+        if(cycleIndex[i]>0){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(tempCourante[i]==Tmax[i]){
+                        if(Tmax[i]-ConsignePrecedente[i]<pas[i]){
+                            TS[i]=TS[i]+(((pas[i]-(Tmax[i]-ConsignePrecedente[i]))/cinetique[i])*3600)*facteurPalier[i];
+                            gaptemps[i] = (((pas[i]-(Tmax[i]-ConsignePrecedente[i]))/cinetique[i])*3600)*facteurPalier[i];
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i]);
+                        }   
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptemps["+i+"]");
+                    }
+                }
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(ConsignePrecedente[i]-iniConsigne[i]<pas[i]){
+                            TS[i]=TS[i]+(((pas[i]-(ConsignePrecedente[i]-iniConsigne[i]))/cinetique[i])*3600)*facteurPalier[i];
+                            gaptemps[i] = (((pas[i]-(ConsignePrecedente[i]-iniConsigne[i]))/cinetique[i])*3600)*facteurPalier[i];
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])
+                        }
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptemps["+i+"]");
+                    }
+                }   
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(tempCourante[i]==Tmin){
+                        if(ConsignePrecedente[i]-Tmin<pas[i]){
+                            TS[i]=TS[i]+(((pas[i]-(ConsignePrecedente[i]-Tmin))/cinetique[i])*3600)*facteurPalier[i];
+                            gaptemps[i] = (((pas[i]-(ConsignePrecedente[i]-Tmin))/cinetique[i])*3600)*facteurPalier[i];
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])
+                        }
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptemps["+i+"]");
+                    }
+                }   
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(iniConsigne[i]-ConsignePrecedente[i]<pas[i]){
+                            TS[i]=TS[i]+(((pas[i]-(-ConsignePrecedente[i]+iniConsigne[i]))/cinetique[i])*3600)*facteurPalier[i];
+                            gaptemps[i] = (((pas[i]-(-ConsignePrecedente[i]+iniConsigne[i]))/cinetique[i])*3600)*facteurPalier[i];
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])
+                        }   
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptemps["+i+"]");
+                    }   
+                }
+            }   
+        }
+    }
+/////////////////// Pour le scénario de saut de palier aux extremes ////////////////////////////////////////////    
+    else if(Nobreak[i]==true && Nomax[i]==false){
+         if(cycleIndex[i]>0){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(tempCourante[i]==Tmax[i]){
+                        if(Tmax[i]-ConsignePrecedente[i]<pas[i]){
+                            TS[i]=TS[i]+(((pas[i])/cinetique[i]+palier[i])*3600)+flow.get("flow_gaptempstot["+i+"]");
+                            gaptemps[i] = (((pas[i])/cinetique[i]+palier[i])*3600);
+                            pasCouper[i]=(Tmax[i]-ConsignePrecedente[i]);
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i]);
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]");
+                    }
+                }
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(ConsignePrecedente[i]-iniConsigne[i]<pas[i]){
+                            TS[i]=TS[i]+(((pas[i])/cinetique[i]+palier[i])*3600)+flow.get("flow_gaptempstot["+i+"]");
+                            gaptemps[i] = (((pas[i])/cinetique[i]+palier[i])*3600);
+                            pasCouper[i]=(ConsignePrecedente[i]-iniConsigne[i]);
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])        
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                    }
+                }   
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(tempCourante[i]==Tmin){
+                        if(ConsignePrecedente[i]-Tmin<pas[i]){
+                            TS[i]=TS[i]+(((pas[i])/cinetique[i]+palier[i])*3600)+flow.get("flow_gaptempstot["+i+"]");
+                            gaptemps[i] = (((pas[i])/cinetique[i]+palier[i])*3600);
+                            pasCouper[i]=(ConsignePrecedente[i]-Tmin);
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]");
+                            cpt[i]=0;
+                        }
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]");
+                    }                          
+                }   
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(iniConsigne[i]-ConsignePrecedente[i]<pas[i]){
+                            TS[i]=TS[i]+(((pas[i])/cinetique[i]+palier[i])*3600)+flow.get("flow_gaptempstot["+i+"]");
+                            gaptemps[i] = (((pas[i])/cinetique[i]+palier[i])*3600);
+                            pasCouper[i]=(iniConsigne[i]-ConsignePrecedente[i]);
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])
+                            pas_consignePrec[i] = (iniConsigne[i]-ConsignePrecedente[i]);
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else if(cycleIndex[i]>mod1[i]){
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]");
+                    }   
+                }
+            }   
+        }
+    }
+/////////////////// Pour le scénario de sauts intelligents ////////////////////////////////////////////    
+    else if(Nobreak[i]==false && Nomax[i]==true){
+         if(cycleIndex[i]>0){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(pasCouper[i]==0){
+                        if(Tmax[i]-flow.get("flow_consigne["+i+"]")<pas[i] && flow.get("flow_cycleDescente["+i+"]")==false && Tmax[i]-(flow.get("flow_consigne["+i+"]")+pas[i])!=0){
+                            gaptemps[i] = pas[i]- (Tmax[i]-flow.get("flow_consigne["+i+"]"));
+                            if(flow.get("flow_consigne["+i+"]")>=(Tmax[i]-gaptemps[i])){
+                                gaptemps[i] = ((pas[i]-(flow.get("flow_consigne["+i+"]")-(Tmax[i]-gaptemps[i])))/cinetique[i])*3600;
+                            }
+                            else{
+                                gaptemps[i] = ((pas[i]-((Tmax[i]-gaptemps[i])-flow.get("flow_consigne["+i+"]")))/cinetique[i])*3600;
+                            }
+                            pasCouper[i]=Tmax[i]-(flow.get("flow_consigne["+i+"]")+pas[i]-Tmax[i])-flow.get("flow_consigne["+i+"]")-pas[i];
+                            pasCouper[i] = -pasCouper[i]
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i]);
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else{
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                    }
+                }
+                else{
+                    if(pasCouper[i]==0){
+                        if(flow.get("flow_consigne["+i+"]")-iniConsigne[i]<pas[i] && flow.get("flow_cycleDescente["+i+"]")==true && flow.get("flow_consigne["+i+"]")-(iniConsigne[i]+pas[i])!=0){
+                           gaptemps[i] = pas[i]- (flow.get("flow_consigne["+i+"]")-iniConsigne[i]);
+                            if(flow.get("flow_consigne["+i+"]")>(iniConsigne[i]+gaptemps[i])){
+                                gaptemps[i] = ((pas[i]-(flow.get("flow_consigne["+i+"]")-(iniConsigne[i]+gaptemps[i])))/cinetique[i])*3600;
+                            }
+                            else{
+                                gaptemps[i] = ((pas[i]-((iniConsigne[i]+gaptemps[i])-flow.get("flow_consigne["+i+"]")))/cinetique[i])*3600;
+                            }
+                            pasCouper[i]= flow.get("flow_consigne["+i+"]")-(iniConsigne[i]+(pas[i]-(flow.get("flow_consigne["+i+"]")-iniConsigne[i])))-pas[i]; 
+                            pasCouper[i] = -pasCouper[i]
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])        
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else{
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                    }
+                }   
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(pasCouper[i]==0){
+                        if(flow.get("flow_consigne["+i+"]")-Tmin<pas[i] && flow.get("flow_cycleDescente["+i+"]")==true && flow.get("flow_consigne["+i+"]")-(Tmin+pas[i])!=0){
+                            gaptemps[i] = pas[i]- (flow.get("flow_consigne["+i+"]")-Tmin);
+                            if(flow.get("flow_consigne["+i+"]")>=(Tmin+gaptemps[i])){
+                                gaptemps[i] = ((pas[i]-(flow.get("flow_consigne["+i+"]")-(Tmin+gaptemps[i])))/cinetique[i])*3600;
+                            }
+                            else{
+                                gaptemps[i] = ((pas[i]-((Tmin+gaptemps[i])-flow.get("flow_consigne["+i+"]")))/cinetique[i])*3600;
+                            }
+                            pasCouper[i]= flow.get("flow_consigne["+i+"]")-(Tmin+(pas[i]-(flow.get("flow_consigne["+i+"]")-Tmin)))-pas[i];
+                            pasCouper[i]=-pasCouper[i]
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i]);
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else{
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                    }
+                }
+                else{
+                    if(pasCouper[i]==0){
+                        if(iniConsigne[i]-flow.get("flow_consigne["+i+"]")<pas[i] && flow.get("flow_cycleDescente["+i+"]")==false && iniConsigne[i]-(flow.get("flow_consigne["+i+"]")+pas[i])!=0){
+                            gaptemps[i] = pas[i]- (iniConsigne[i]-flow.get("flow_consigne["+i+"]"));
+                            if(flow.get("flow_consigne["+i+"]")>(iniConsigne[i]-gaptemps[i])){
+                                gaptemps[i] = ((pas[i]-(flow.get("flow_consigne["+i+"]")-(iniConsigne[i]-gaptemps[i])))/cinetique[i])*3600;
+                            }
+                            else{
+                                gaptemps[i] = ((pas[i]-((iniConsigne[i]-gaptemps[i])-flow.get("flow_consigne["+i+"]")))/cinetique[i])*3600;
+                            }
+                            pasCouper[i]=iniConsigne[i]-(flow.get("flow_consigne["+i+"]")+pas[i]-iniConsigne[i])-flow.get("flow_consigne["+i+"]")-pas[i];
+                            pasCouper[i]=-pasCouper[i];
+                            flow.set("flow_pasCouper["+i+"]",pasCouper[i])
+                            flow.set("flow_gaptemps["+i+"]",gaptemps[i])        
+                            pas_consignePrec[i] = pasCouper[i];
+                            flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+                            cpt[i]=0;
+                        }
+                        else{
+                            TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                            cpt[i]=0;
+                        }
+                    }
+                    else{
+                        TS[i]=TS[i]+flow.get("flow_gaptempstot["+i+"]"); 
+                    }
+                }
+            }   
+        }
+    }
+}
+
+/////////////// Récupération et assignation de la température ////////////////////////////////
+for(i = 0 ; i < len ; i++) {
+    consigne[i] = flow.get("flow_consigne["+i+"]");
+}
+
+
+for(i = 0 ; i < len ; i++) {
+    if (cycleStop[i]===false){
+        if(cycleIndex[i] === 0){
+            consigne[i] = flow.get("flow_iniConsigne["+i+"]");
+            flow.set("flow_consigne["+i+"]",consigne[i]);
+            flow.set("flow_cycleDescente["+i+"]",false);
+        }
+    }
+    else {
+        flow.set("flow_consigne["+i+"]",20);
+    }
+}
+////////////////////// Assignation du sens de cycle et du pas à chaque palier ///////////////////////////////
+for(i = 0 ; i < len ; i++) {
+    if((TS[i] > ((palier[i] + (pas[i] / cinetique[i])) * (cycleIndex[i] + 1) * 3600)) && (startCycle[i]===true)){
+////////////////////// incrémentation du facteur de palier et assignation du gap de temps total ///////////////////////////////
+        if(Nobreak[i]==false && Nomax[i]==false){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(tempCourante[i]==Tmax[i]){
+                        if(Tmax[i]-ConsignePrecedente[i]<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]); 
+                        }   
+                    }
+                }
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(ConsignePrecedente[i]-iniConsigne[i]<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                        }
+                    }
+                }   
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(tempCourante[i]==Tmin){
+                        if(ConsignePrecedente[i]-Tmin<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                        }
+                    }
+                }   
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(iniConsigne[i]-ConsignePrecedente[i]<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                        }   
+                    }
+                }
+            }
+        }
+        else if(Nobreak[i]==true && Nomax[i]==false){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(tempCourante[i]==Tmax[i]){
+                        if(Tmax[i]-ConsignePrecedente[i]<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]); 
+                            gaptempstot[i] = gaptempstot[i] + gaptemps[i]
+                            flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                        }   
+                    }
+                }
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(ConsignePrecedente[i]-iniConsigne[i]<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                            gaptempstot[i] = gaptempstot[i] + gaptemps[i]
+                            flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                        }
+                    }
+                }   
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(tempCourante[i]==Tmin){
+                        if(ConsignePrecedente[i]-Tmin<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                            gaptempstot[i] = gaptempstot[i] + gaptemps[i]
+                            flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                        }
+                    }
+                }   
+                else{
+                    if(tempCourante[i]==iniConsigne[i]){
+                        if(iniConsigne[i]-ConsignePrecedente[i]<pas[i]){
+                            facteurPalier[i]=facteurPalier[i]+1;
+                            flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                            gaptempstot[i] = gaptempstot[i] + gaptemps[i]
+                            flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                        }   
+                    }
+                }
+            }
+        }
+        else if(Nobreak[i]==false && Nomax[i]==true){
+            if(Sensconsigne[i]>0.5){
+                if(cycleDescente[i]===false){
+                    if(Tmax[i]-flow.get("flow_consigne["+i+"]")<pas[i]){
+                        facteurPalier[i]=facteurPalier[i]+1;
+                        flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]); 
+                        gaptempstot[i] = gaptempstot[i] + flow.get("flow_gaptemps["+i+"]")
+                        flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                    }   
+                }
+                else{
+                    if(flow.get("flow_consigne["+i+"]")-iniConsigne[i]<pas[i]){
+                        facteurPalier[i]=facteurPalier[i]+1;
+                        flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                        gaptempstot[i] = gaptempstot[i] + flow.get("flow_gaptemps["+i+"]")
+                        flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                    }
+                }   
+            }
+            else{
+                if(cycleDescente[i]===true){
+                    if(flow.get("flow_consigne["+i+"]")-Tmin<pas[i]){
+                        facteurPalier[i]=facteurPalier[i]+1;
+                        flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                        gaptempstot[i] = gaptempstot[i] + flow.get("flow_gaptemps["+i+"]")
+                        flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                    }
+                }   
+                else{
+                    if(iniConsigne[i]-flow.get("flow_consigne["+i+"]")<pas[i]){
+                        facteurPalier[i]=facteurPalier[i]+1;
+                        flow.set("flow_facteurPalier["+i+"]",facteurPalier[i]);
+                        gaptempstot[i] = gaptempstot[i] + flow.get("flow_gaptemps["+i+"]")
+                        flow.set("flow_gaptempstot["+i+"]",gaptempstot[i]);
+                    }   
+                }
+            }
+        }
+////////////////////////assignation du pas et du sens de changement de température pour le prochain palier de température////////////////////////
+        if(Sensconsigne[i]>0.5){
+            if(consigne[i] >= Tmax[i]) {
+                flow.set("flow_cycleDescente["+i+"]",true);
+            } 
+            else if (consigne[i] <= iniConsigne[i]) {
+                flow.set("flow_cycleDescente["+i+"]",false);
+            }
+            cycleDescente=flow.get("flow_cycleDescente");
+            if (cycleDescente[i]===true) {
+                ConsignePrecedente[i] = consigne[i];
+                consigne[i] = consigne[i] - (pas[i] - pasCouper[i]);
+                if(Nomax[i]==true){
+                    flow.set("flow_ConsignePrecedente["+i+"]",ConsignePrecedente[i]);
+                    if(pasCouper[i]!=0){
+                        flow.set("flow_cycleDescente["+i+"]",false);
+                    }
+                }
+                if (iniConsigne[i] > consigne[i]) {
+                    consigne[i] = iniConsigne[i];
+                }
+            } 
+            else {
+                ConsignePrecedente[i] = consigne[i];
+                consigne[i] = consigne[i] + (pas[i] - pasCouper[i]);
+                if(Nomax[i]==true){
+                    flow.set("flow_ConsignePrecedente["+i+"]",ConsignePrecedente[i]);
+                    if(pasCouper[i]!=0){
+                        flow.set("flow_cycleDescente["+i+"]",true);
+                    }
+                }
+                if (consigne[i] > Tmax[i]) {
+                    consigne[i] = Tmax[i];
+                }
+            }
+            flow.set("flow_consigne["+i+"]",consigne[i]);
+        }   
+        else{
+            if(consigne[i] <= Tmin) {
+                flow.set("flow_cycleDescente["+i+"]",false);
+            }    
+            else if (consigne[i] >= iniConsigne[i]) {
+                flow.set("flow_cycleDescente["+i+"]",true);
+            }
+            cycleDescente=flow.get("flow_cycleDescente");
+            if (cycleDescente[i]===false) {
+                ConsignePrecedente[i] = consigne[i];
+                consigne[i] = consigne[i] + (pas[i] - pasCouper[i]);
+                if(Nomax[i]==true){
+                    flow.set("flow_ConsignePrecedente["+i+"]",ConsignePrecedente[i]);
+                    if(pasCouper[i]!=0){
+                        flow.set("flow_cycleDescente["+i+"]",true);
+                    }
+                }
+                if (iniConsigne[i] < consigne[i]) {
+                    consigne[i] = iniConsigne[i];
+                }   
+            } 
+            else {
+                ConsignePrecedente[i] = consigne[i];
+                consigne[i] = consigne[i] - (pas[i] - pasCouper[i]);
+                if(Nomax[i]==true){
+                    flow.set("flow_ConsignePrecedente["+i+"]",ConsignePrecedente[i]);
+                    if(pasCouper[i]!=0){
+                        flow.set("flow_cycleDescente["+i+"]",false);
+                    }
+                }
+                if (consigne[i] < Tmin) {
+                    consigne[i] = Tmin;
+                }
+            }   
+            flow.set("flow_consigne["+i+"]",consigne[i]);
+        }
+        cycleIndex[i] = cycleIndex[i] + 1;
+        if(cpt[i]==1){
+            add[i]=pas_consignePrec[i];
+        }
+        else{
+            add[i]=0;
+        }
+        if(pasCouper[i]!=0){
+            cpt[i]=cpt[i]+1
+        }
+        flow.set("flow_add["+i+"]",add[i]);
+        flow.set("flow_pas_consignePrec["+i+"]",pas_consignePrec[i]);
+        pasCouper[i]=0;
+        flow.set("flow_pasCouper["+i+"]",pasCouper[i]);
+    }
+}
+
+/////////////////////////////////////////// Calcul des temps de péraparation de cycle et des temps de cycle au total ///////////////////////////////////////
+var TC =[]; // variable donnant une estimation du temps de préparation de cycle
+var TT =[]; // variable indiquant le temps total estimé pour établir un cycle complet de montée/descente ou descente/montée
+for(i = 0 ; i < len ; i++) {
+    TC[i]= (((palier[i] + (pas[i] / cinetique[i])) * 3600)/3600).toFixed(2);
+    if(Nobreak[i]==true || Nomax[i]==true){
+        if(Sensconsigne[i]>0.5){
+            TT[i] = ((((Tmax[i]-iniConsigne[i])*2)/pas[i])*(palier[i]+ (pas[i]/cinetique[i]))+ (((palier[i] + (pas[i] / cinetique[i])) * 3600))/3600).toFixed(2)
+        }
+        else{
+            TT[i] = ((((iniConsigne[i]-Tmin)*2)/pas[i])*(palier[i]+ (pas[i]/cinetique[i]))+ (((palier[i] + (pas[i] / cinetique[i])) * 3600))/3600).toFixed(2)
+        }
+    }
+    else{
+        if(Sensconsigne[i]>0.5){    
+            TT[i] = (((((Tmax[i]-iniConsigne[i])/pas[i])*(pas[i]/cinetique[i]) + (palier[i]) *Math.ceil((Tmax[i]-iniConsigne[i])/pas[i]))*2) + (((palier[i] + (pas[i] / cinetique[i])) * 3600))/3600).toFixed(2);
+        }
+        else{
+            TT[i] = (((((iniConsigne[i]-Tmin)/pas[i])*(pas[i]/cinetique[i]) + (palier[i]) *Math.ceil((iniConsigne[i]-Tmin)/pas[i]))*2) + (((palier[i] + (pas[i] / cinetique[i])) * 3600))/3600).toFixed(2);
+}
+   }
+}
+//////////////////////////// Renvoie des estimations de temps pour les afficher sur le Dashboard Node Red  
+msg.TC1 = TC[0];
+msg.TT1 = TT[0];
+msg.TC2 = TC[1];
+msg.TT2 = TT[1];
+msg.TC3 = TC[2];
+msg.TT3 = TT[2];
+msg.TC4 = TC[3];
+msg.TT4 = TT[3];
+msg.TC5 = TC[4];
+msg.TT5 = TT[4];
+msg.TC6 = TC[5];
+msg.TT6 = TT[5];
+msg.TC7 = TC[6];
+msg.TT7 = TT[6];
+msg.TC8 = TC[7];
+msg.TT8 = TT[7];
+msg.TC9 = TC[8];
+msg.TT9 = TT[8];
+msg.TC10 = TC[9];
+msg.TT10 = TT[9];
+msg.TC11 = TC[10];
+msg.TT11 = TT[10];
+msg.TC12 = TC[11];
+msg.TT12 = TT[11];
+return msg;
+
